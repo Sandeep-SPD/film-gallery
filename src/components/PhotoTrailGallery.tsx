@@ -24,10 +24,14 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
   const [photos, setPhotos] = useState<SpawnedPhoto[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<FilmStill | null>(null);
   const [viewMode, setViewMode] = useState<'trail' | 'archive'>('trail');
+  const [isInteracting, setIsInteracting] = useState(false);
 
   const lastSpawnRef = useRef({ x: 0, y: 0, time: 0 });
   const photoIndexRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const holdIntervalRef = useRef<number | null>(null);
+  const touchStartPosRef = useRef({ x: 0, y: 0 });
+  const hasMovedRef = useRef(false);
 
   // Set cursor to touch and move
   useEffect(() => {
@@ -46,35 +50,109 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
       x,
       y,
       rotation: (Math.random() - 0.5) * 18,
-      scale: 0.9 + Math.random() * 0.25,
+      scale: 0.85 + Math.random() * 0.25,
       timestamp: Date.now(),
     };
 
     setPhotos((prev) => {
-      // keep up to 28 photos for smooth performance
+      // keep up to 32 photos for smooth performance
       const updated = [...prev, newPhoto];
-      if (updated.length > 28) {
-        return updated.slice(updated.length - 28);
+      if (updated.length > 32) {
+        return updated.slice(updated.length - 32);
       }
       return updated;
     });
   }, []);
 
-  // Handle pointer move to spawn on distance threshold
-  const handlePointerMove = (e: React.PointerEvent) => {
+  // Continuous pointer move spawning with low mobile threshold
+  const handleMoveCoords = useCallback((clientX: number, clientY: number) => {
     if (viewMode !== 'trail') return;
 
-    const dx = e.clientX - lastSpawnRef.current.x;
-    const dy = e.clientY - lastSpawnRef.current.y;
+    const dx = clientX - lastSpawnRef.current.x;
+    const dy = clientY - lastSpawnRef.current.y;
     const dist = Math.hypot(dx, dy);
-    const now = Date.now();
+    const now = performance.now();
 
-    // Spawn every ~65px moved or minimum 70ms
-    if (dist > 65 && now - lastSpawnRef.current.time > 60) {
-      spawnPhoto(e.clientX, e.clientY);
-      lastSpawnRef.current = { x: e.clientX, y: e.clientY, time: now };
+    // Fast responsive threshold (24px distance or 75ms)
+    // Works instantaneously on phones as finger glides across screen
+    if (dist > 24 || (dist > 8 && now - lastSpawnRef.current.time > 80)) {
+      spawnPhoto(clientX, clientY);
+      lastSpawnRef.current = { x: clientX, y: clientY, time: now };
     }
-  };
+  }, [viewMode, spawnPhoto]);
+
+  // Start touch or click interaction
+  const handleStartInteraction = useCallback((clientX: number, clientY: number) => {
+    if (viewMode !== 'trail') return;
+    setIsInteracting(true);
+    hasMovedRef.current = false;
+    touchStartPosRef.current = { x: clientX, y: clientY };
+
+    // Spawn first photo immediately
+    spawnPhoto(clientX, clientY);
+    lastSpawnRef.current = { x: clientX, y: clientY, time: performance.now() };
+
+    // Hold-to-stream interval: while finger or mouse is held down,
+    // continue spawning photos with slight jitter even if stationary
+    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
+    holdIntervalRef.current = window.setInterval(() => {
+      const jitterX = (Math.random() - 0.5) * 16;
+      const jitterY = (Math.random() - 0.5) * 16;
+      spawnPhoto(lastSpawnRef.current.x + jitterX, lastSpawnRef.current.y + jitterY);
+    }, 180);
+  }, [viewMode, spawnPhoto]);
+
+  const handleEndInteraction = useCallback(() => {
+    setIsInteracting(false);
+    if (holdIntervalRef.current) {
+      clearInterval(holdIntervalRef.current);
+      holdIntervalRef.current = null;
+    }
+  }, []);
+
+  // Native non-passive touch event listeners to guarantee continuous tracking on phones
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (viewMode !== 'trail') return;
+      if (e.touches.length > 0) {
+        const touch = e.touches[0];
+        handleStartInteraction(touch.clientX, touch.clientY);
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (viewMode !== 'trail') return;
+      if (e.touches.length > 0) {
+        // Prevent default mobile pull-to-refresh / scrolling
+        e.preventDefault();
+        const touch = e.touches[0];
+        if (Math.hypot(touch.clientX - touchStartPosRef.current.x, touch.clientY - touchStartPosRef.current.y) > 6) {
+          hasMovedRef.current = true;
+        }
+        handleMoveCoords(touch.clientX, touch.clientY);
+      }
+    };
+
+    const onTouchEnd = () => {
+      handleEndInteraction();
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+      if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
+    };
+  }, [viewMode, handleStartInteraction, handleMoveCoords, handleEndInteraction]);
 
   // Initial greeting scatter
   useEffect(() => {
@@ -82,14 +160,14 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
       const cx = window.innerWidth / 2;
       const cy = window.innerHeight / 2;
       const initialPositions = [
-        { x: cx - 180, y: cy - 90 },
+        { x: cx - 120, y: cy - 70 },
         { x: cx, y: cy },
-        { x: cx + 180, y: cy + 90 },
+        { x: cx + 120, y: cy + 70 },
       ];
       initialPositions.forEach((pos, idx) => {
         setTimeout(() => {
           spawnPhoto(pos.x, pos.y);
-        }, idx * 120);
+        }, idx * 100);
       });
     }
   }, [spawnPhoto, photos.length]);
@@ -103,28 +181,35 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
     const h = window.innerHeight;
     for (let i = 0; i < 9; i++) {
       setTimeout(() => {
-        const rx = 100 + Math.random() * (w - 250);
-        const ry = 120 + Math.random() * (h - 260);
+        const rx = 60 + Math.random() * (w - 140);
+        const ry = 100 + Math.random() * (h - 220);
         spawnPhoto(rx, ry);
-      }, i * 90);
+      }, i * 80);
     }
   };
 
   return (
     <div
       ref={containerRef}
-      onPointerMove={handlePointerMove}
-      className="relative w-screen h-screen overflow-hidden bg-[#050505] select-none"
+      onMouseDown={(e) => handleStartInteraction(e.clientX, e.clientY)}
+      onMouseMove={(e) => {
+        if (isInteracting) {
+          handleMoveCoords(e.clientX, e.clientY);
+        }
+      }}
+      onMouseUp={handleEndInteraction}
+      onMouseLeave={handleEndInteraction}
+      className="relative w-screen h-screen overflow-hidden bg-[#050505] select-none touch-none"
     >
       {/* Background ambient texture and grid lines */}
       <div className="absolute inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#333_1px,transparent_1px)] [background-size:24px_24px]" />
 
       {/* Floating Mode Switcher & Controls */}
-      <div className="absolute top-24 left-6 md:left-12 z-30 flex flex-wrap items-center gap-3">
+      <div className="absolute top-20 sm:top-24 left-4 sm:left-12 z-30 flex flex-wrap items-center gap-2 sm:gap-3">
         <div className="flex bg-neutral-900/90 border border-neutral-800 rounded-md p-1 backdrop-blur-md">
           <button
             onClick={() => setViewMode('trail')}
-            className={`px-3 py-1.5 text-xs font-mono tracking-wider uppercase transition-colors rounded ${
+            className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-mono tracking-wider uppercase transition-colors rounded ${
               viewMode === 'trail'
                 ? 'bg-[#ff2203] text-white font-bold'
                 : 'text-neutral-400 hover:text-white'
@@ -134,13 +219,13 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
           </button>
           <button
             onClick={() => setViewMode('archive')}
-            className={`px-3 py-1.5 text-xs font-mono tracking-wider uppercase transition-colors rounded ${
+            className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-mono tracking-wider uppercase transition-colors rounded ${
               viewMode === 'archive'
                 ? 'bg-[#ff2203] text-white font-bold'
                 : 'text-neutral-400 hover:text-white'
             }`}
           >
-            ALL 35MM ARCHIVE ({ALL_35MM_IMAGES.length})
+            ALL 35MM ({ALL_35MM_IMAGES.length})
           </button>
         </div>
 
@@ -148,13 +233,13 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={autoScatter}
-              className="px-3 py-1.5 bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 text-xs font-mono uppercase tracking-wider text-neutral-300 hover:text-white transition-colors backdrop-blur-md rounded"
+              className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 text-[11px] sm:text-xs font-mono uppercase tracking-wider text-neutral-300 hover:text-white transition-colors backdrop-blur-md rounded"
             >
               AUTO SCATTER
             </button>
             <button
               onClick={clearCanvas}
-              className="px-3 py-1.5 bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 text-xs font-mono uppercase tracking-wider text-neutral-400 hover:text-white transition-colors backdrop-blur-md rounded"
+              className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 text-[11px] sm:text-xs font-mono uppercase tracking-wider text-neutral-400 hover:text-white transition-colors backdrop-blur-md rounded"
             >
               CLEAR ({photos.length})
             </button>
@@ -164,12 +249,12 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
 
       {/* Center Prompt when empty in trail mode */}
       {viewMode === 'trail' && photos.length === 0 && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
-          <p className="text-xl sm:text-2xl font-bold tracking-widest uppercase text-neutral-600 animate-pulse">
-            MOVE YOUR CURSOR OR TOUCH THE SCREEN
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 px-4 text-center">
+          <p className="text-lg sm:text-2xl font-bold tracking-widest uppercase text-neutral-500 animate-pulse">
+            HOLD & DRAG YOUR FINGER TO SPAWN PHOTOS
           </p>
-          <span className="text-xs font-mono text-neutral-700 tracking-widest mt-2 uppercase">
-            SPAWN 35MM ANALOG FILM FRAMES
+          <span className="text-[11px] sm:text-xs font-mono text-neutral-600 tracking-widest mt-2 uppercase">
+            35MM ANALOG CONTINUOUS RIBBON
           </span>
         </div>
       )}
@@ -179,7 +264,7 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
         <div className="absolute inset-0 pointer-events-none">
           {photos.map((item, index) => {
             const age = photos.length - index;
-            const opacity = Math.max(0.3, 1 - age * 0.025);
+            const opacity = Math.max(0.35, 1 - age * 0.02);
 
             return (
               <div
@@ -188,7 +273,9 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
                   e.stopPropagation();
                   setSelectedPhoto(item.image);
                 }}
-                className="absolute pointer-events-auto cursor-pointer transition-transform duration-300 ease-out hover:scale-110 hover:z-[50]"
+                className={`absolute pointer-events-auto cursor-pointer transition-transform duration-200 ease-out active:scale-95 ${
+                  isInteracting ? 'pointer-events-none' : 'pointer-events-auto hover:scale-105 hover:z-[60]'
+                }`}
                 style={{
                   left: `${item.x}px`,
                   top: `${item.y}px`,
@@ -197,8 +284,8 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
                   zIndex: index + 5,
                 }}
               >
-                {/* 35mm Polaroid/film frame */}
-                <div className="bg-white p-2.5 pb-6 shadow-[0_15px_35px_rgba(0,0,0,0.85)] border border-neutral-300 w-48 sm:w-56 group">
+                {/* Responsive 35mm Polaroid/film frame (compact on phones, full on desktop) */}
+                <div className="bg-white p-2 pb-4 sm:p-2.5 sm:pb-6 shadow-[0_12px_30px_rgba(0,0,0,0.85)] border border-neutral-300 w-36 sm:w-52 group">
                   <div className="relative overflow-hidden aspect-[4/3] bg-neutral-900">
                     <img
                       src={item.image.url}
@@ -207,11 +294,11 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
-                  <div className="mt-2 flex justify-between items-center text-[9px] font-mono tracking-wider text-neutral-800">
-                    <span className="font-bold">{item.image.caption}</span>
-                    <span className="text-neutral-500">{item.image.location}</span>
+                  <div className="mt-1.5 flex justify-between items-center text-[8px] sm:text-[9px] font-mono tracking-wider text-neutral-800">
+                    <span className="font-bold truncate">{item.image.caption}</span>
+                    <span className="text-neutral-500 ml-1">{item.image.location}</span>
                   </div>
-                  <div className="text-[8px] font-mono tracking-widest text-[#ff2203] uppercase">
+                  <div className="text-[7px] sm:text-[8px] font-mono tracking-widest text-[#ff2203] uppercase">
                     {item.image.format}
                   </div>
                 </div>
@@ -223,10 +310,10 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
 
       {/* ARCHIVE VIEW: Full masonry grid of all 70 stills */}
       {viewMode === 'archive' && (
-        <div className="absolute inset-0 pt-36 pb-20 px-6 md:px-12 overflow-y-auto no-scrollbar">
+        <div className="absolute inset-0 pt-32 pb-20 px-4 md:px-12 overflow-y-auto no-scrollbar pointer-events-auto">
           <div className="max-w-7xl mx-auto">
-            <div className="mb-6 flex justify-between items-baseline border-b border-neutral-800 pb-3">
-              <h2 className="text-2xl font-bold uppercase tracking-tight text-white">
+            <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-baseline gap-2 border-b border-neutral-800 pb-3">
+              <h2 className="text-xl sm:text-2xl font-bold uppercase tracking-tight text-white">
                 35MM FILM ROLLS ARCHIVE
               </h2>
               <span className="text-xs font-mono text-neutral-400">
@@ -234,7 +321,7 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
               {ALL_35MM_IMAGES.map((img) => (
                 <div
                   key={img.id}
@@ -267,11 +354,11 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
       {selectedPhoto && (
         <div
           onClick={() => setSelectedPhoto(null)}
-          className="fixed inset-0 z-[500] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 sm:p-8 animate-in fade-in duration-200"
+          className="fixed inset-0 z-[500] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 sm:p-8 animate-in fade-in duration-200 pointer-events-auto"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative max-w-4xl w-full bg-neutral-950 border border-neutral-800 p-4 sm:p-6 shadow-2xl flex flex-col md:flex-row gap-6"
+            className="relative max-w-4xl w-full bg-neutral-950 border border-neutral-800 p-4 sm:p-6 shadow-2xl flex flex-col md:flex-row gap-6 max-h-[90vh] overflow-y-auto"
           >
             {/* Close button */}
             <button
@@ -282,11 +369,11 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
             </button>
 
             {/* Photo preview */}
-            <div className="flex-1 bg-black flex items-center justify-center overflow-hidden border border-neutral-900">
+            <div className="flex-1 bg-black flex items-center justify-center overflow-hidden border border-neutral-900 min-h-[260px]">
               <img
                 src={selectedPhoto.url}
                 alt={selectedPhoto.caption}
-                className="max-h-[75vh] w-auto object-contain"
+                className="max-h-[60vh] sm:max-h-[75vh] w-auto object-contain"
               />
             </div>
 
@@ -296,10 +383,10 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
                 <span className="text-[10px] font-mono tracking-widest text-[#ff2203] uppercase">
                   ANALOG ARCHIVE
                 </span>
-                <h3 className="text-2xl font-bold uppercase text-white mt-1">
+                <h3 className="text-xl sm:text-2xl font-bold uppercase text-white mt-1">
                   {selectedPhoto.caption}
                 </h3>
-                <div className="mt-6 space-y-3 font-mono text-xs border-t border-neutral-800 pt-4">
+                <div className="mt-4 sm:mt-6 space-y-2.5 font-mono text-xs border-t border-neutral-800 pt-4">
                   <div className="flex justify-between text-neutral-400">
                     <span>EMULSION:</span>
                     <span className="text-white">{selectedPhoto.format}</span>
@@ -314,7 +401,7 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>CAPTURE:</span>
-                    <span className="text-white">Leica M6 / 35mm Summicron</span>
+                    <span className="text-white">Leica M6 / 35mm</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>STATUS:</span>
@@ -323,13 +410,13 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
                 </div>
               </div>
 
-              <div className="pt-6 border-t border-neutral-800 flex justify-between items-center text-xs font-mono text-neutral-500">
+              <div className="pt-6 border-t border-neutral-800 flex justify-between items-center text-xs font-mono text-neutral-500 mt-4 md:mt-0">
                 <span>© RODEO COLLECTIVE</span>
                 <button
                   onClick={() => setSelectedPhoto(null)}
                   className="text-white hover:text-[#ff2203] uppercase font-bold"
                 >
-                  CLOSE [ESC]
+                  CLOSE [✕]
                 </button>
               </div>
             </div>
