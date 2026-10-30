@@ -1,0 +1,6 @@
+{
+  "name": "Rodeo Film — Gallery & Creative Collective",
+  "description": "High-fidelity recreation of the award-winning Rodeo Film gallery featuring infinite 2D draggable canvas, 35mm photo trail, cinematic video reels, and interactive editorial index.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
