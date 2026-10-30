@@ -19,9 +19,11 @@ export const Loader: React.FC<LoaderProps> = ({ onLoaded }) => {
 
   useEffect(() => {
     let current = 0;
+    const startTime = performance.now();
+
     const interval = setInterval(() => {
-      // realistic loading pacing with crimson vibe
-      const increment = Math.floor(Math.random() * 6) + 3;
+      // Snappy, swift progress increment (finishes in ~600-800ms)
+      const increment = Math.floor(Math.random() * 8) + 8;
       current = Math.min(100, current + increment);
       setPercent(current);
 
@@ -38,17 +40,38 @@ export const Loader: React.FC<LoaderProps> = ({ onLoaded }) => {
           setIsHiding(true);
           setTimeout(() => {
             onLoaded();
-          }, 850);
-        }, 400);
+          }, 350);
+        }, 120);
       }
-    }, 45);
+    }, 22);
 
-    return () => clearInterval(interval);
+    // Guaranteed fallback safety: automatically enter website after 1.2 seconds max
+    const fallbackTimer = setTimeout(() => {
+      clearInterval(interval);
+      setPercent(100);
+      setIsHiding(true);
+      setTimeout(() => {
+        onLoaded();
+      }, 350);
+    }, 1200);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(fallbackTimer);
+    };
   }, [onLoaded]);
+
+  const handleQuickSkip = () => {
+    setIsHiding(true);
+    setTimeout(() => {
+      onLoaded();
+    }, 200);
+  };
 
   return (
     <div
-      className={`fixed inset-0 z-[900] text-white flex flex-col justify-between overflow-hidden transition-all duration-800 ease-[cubic-bezier(0.85,0,0.15,1)] ${
+      onClick={handleQuickSkip}
+      className={`fixed inset-0 z-[900] text-white flex flex-col justify-between overflow-hidden transition-all duration-400 ease-out cursor-pointer ${
         isHiding ? 'opacity-0 pointer-events-none scale-105 blur-sm' : 'opacity-100'
       }`}
       style={{
@@ -71,10 +94,21 @@ export const Loader: React.FC<LoaderProps> = ({ onLoaded }) => {
             INDIAN INSTITUTE OF TECHNOLOGY KHARAGPUR
           </span>
         </div>
-        <div className="text-[10px] sm:text-xs font-mono tracking-[0.2em] text-[#ff4d6d] uppercase flex items-center gap-2">
-          <span>ANNUAL SOCIAL & CULTURAL EXTRAVAGANZA</span>
-          <span className="text-neutral-600">/</span>
-          <span className="text-neutral-400">ESTD. 1960</span>
+        <div className="flex items-center gap-4">
+          <div className="text-[10px] sm:text-xs font-mono tracking-[0.2em] text-[#ff4d6d] uppercase flex items-center gap-2">
+            <span>ANNUAL SOCIAL & CULTURAL EXTRAVAGANZA</span>
+            <span className="text-neutral-600">/</span>
+            <span className="text-neutral-400">ESTD. 1960</span>
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleQuickSkip();
+            }}
+            className="px-2.5 py-1 bg-black/60 hover:bg-[#dc143c] border border-neutral-700 hover:border-[#dc143c] text-[10px] font-mono tracking-widest uppercase rounded transition-colors text-white"
+          >
+            SKIP →
+          </button>
         </div>
       </div>
 
