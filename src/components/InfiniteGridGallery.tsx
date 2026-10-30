@@ -102,7 +102,7 @@ export const InfiniteGridGallery: React.FC<InfiniteGridGalleryProps> = ({
     let animId: number;
 
     const tick = () => {
-      // Smooth lerp movement with inertia
+      // Smooth natural lerp movement with inertia (restored to previous default)
       const lerpFactor = isMobile ? 0.15 : 0.12;
       const dx = (targetRef.current.x - posRef.current.x) * lerpFactor;
       const dy = (targetRef.current.y - posRef.current.y) * lerpFactor;
@@ -115,8 +115,8 @@ export const InfiniteGridGallery: React.FC<InfiniteGridGalleryProps> = ({
       totalCoordsRef.current.y += dy;
 
       if (!isDraggingRef.current) {
-        // Subtle ambient kinetic drift
-        targetRef.current.x -= 0.12;
+        // Fast automatic scrolling to the right (brisk cinematic auto-scroll)
+        targetRef.current.x -= 1.85;
       }
 
       // Toroidal wrapping: keep posRef centered within [-TOTAL_WIDTH / 2, TOTAL_WIDTH / 2]
@@ -169,7 +169,7 @@ export const InfiniteGridGallery: React.FC<InfiniteGridGalleryProps> = ({
     setCursorMode('default', 'DRAGGING');
   }, [setCursorMode]);
 
-  // Handle Drag Move with high mobile touch sensitivity
+  // Handle Drag Move (restored to previous default touch sensitivity)
   const handleMove = useCallback((clientX: number, clientY: number) => {
     if (!isDraggingRef.current) return;
 
@@ -185,7 +185,7 @@ export const InfiniteGridGallery: React.FC<InfiniteGridGalleryProps> = ({
       hasMovedRef.current = true;
     }
 
-    // High sensitivity on mobile so gentle finger motion moves the gallery directly
+    // Restored to previous default sensitivity (2.5 on touch, 1.35 on desktop)
     const sensitivity = isTouchRef.current ? 2.5 : 1.35;
     targetRef.current.x += dx * sensitivity;
     targetRef.current.y += dy * sensitivity;
@@ -197,11 +197,11 @@ export const InfiniteGridGallery: React.FC<InfiniteGridGalleryProps> = ({
     };
   }, []);
 
-  // Handle Drag End with momentum flick throw
+  // Handle Drag End with momentum flick throw (restored to previous default)
   const handleEnd = useCallback(() => {
     if (isDraggingRef.current) {
       isDraggingRef.current = false;
-      // High throw multiplier on mobile so a single swipe glides across 1 to 2 images easily
+      // Restored to previous throw multiplier (16 on touch, 4 on desktop)
       const throwMultiplier = isTouchRef.current ? 16 : 4;
       targetRef.current.x += velocityRef.current.x * throwMultiplier;
       targetRef.current.y += velocityRef.current.y * throwMultiplier;

@@ -99,12 +99,11 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
         spawnPhoto(clientX, clientY);
         lastSpawnRef.current = { x: clientX, y: clientY, time: performance.now() };
 
-        // Paced hold-to-stream interval for phones:
-        // Spawns with gentle 420ms pacing so images do not overwhelm and each is visible
+        // Paced hold-to-stream interval for phones: tuned a little faster as requested
         if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
         holdIntervalRef.current = window.setInterval(() => {
           const now = performance.now();
-          if (now - lastSpawnRef.current.time > 380) {
+          if (now - lastSpawnRef.current.time > 240) {
             const jitterX = (Math.random() - 0.5) * 18;
             const jitterY = (Math.random() - 0.5) * 18;
             spawnPhoto(lastSpawnRef.current.x + jitterX, lastSpawnRef.current.y + jitterY);
@@ -114,7 +113,7 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
               time: now,
             };
           }
-        }, 420);
+        }, 280);
       }
     };
 
@@ -131,9 +130,8 @@ export const PhotoTrailGallery: React.FC<PhotoTrailGalleryProps> = ({
         const dist = Math.hypot(dx, dy);
         const now = performance.now();
 
-        // Phone dragging: requires at least 58px travel AND 250ms interval
-        // This ensures each image is individually visible and appreciated as you drag
-        if (dist > 58 && now - lastSpawnRef.current.time > 250) {
+        // Phone dragging: tuned a little faster (40px travel and 150ms interval)
+        if (dist > 40 && now - lastSpawnRef.current.time > 150) {
           spawnPhoto(clientX, clientY);
           lastSpawnRef.current = { x: clientX, y: clientY, time: now };
         }
